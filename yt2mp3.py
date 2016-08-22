@@ -1,6 +1,7 @@
 #!/usr/bin/env python2
 from __future__ import print_function
 from subprocess import call
+import argparse
 import eyed3
 import sys
 import os
@@ -29,82 +30,35 @@ OPTIONS: Additional options:
                   (If given, a previous try that got interrupted is resumed)
 '''
 
-def parse_command(arg_list):
-    options = {'quality' : ['-q', '-Q' , '--quality', '--Quality', '-b', '-B' '--bitrate' '--Bitrate'], 
-               'tags'    : ['-t', '-T', '--tags', '--Tags'], 
-               'rename'  : ['-r', '-R', '--rename', '--Rename'],
-               'cont'    : ['-c', '-C', '--continue', '--Continue'],
-               'num'     : ['-n', '-N', '--number', '--Number']                                        }
-    bitrate = 196
-    tags    = True
-    urlfile = False
-    rename  = False
-    cont    = False
-    num     = 0 
+def parse_args():
+    parser = argparse.ArgumentParser(description='Convert YouTube Videos to MP3.')
+    parser.add_argument('urlfile', metavar='urlfile', type=str, help='File containing the urls of the target videos')
+    parser.add_argument('-q', '--quality', help='Quality (bitrate) of MP3. E.g. -q 256 for 256 kB/s', default=192, type=int)
+    parser.add_argument('-n', '--notags', action='store_true', help='Don\'t use tags given in urlfile')
+    parser.add_argument('-r', '--rename', action='store_true', help='Rename filenames of MP3\'s according to -t tag')
+    parser.add_argument('-c', '--continue', dest='cont', action='store_true', help='Retry previous try')
 
-    while arg_list:
-        if arg_list[0] in options['quality']:
-            del arg_list[0]
-            try:
-                bitrate = int(arg_list[0].replace('K', ''))
-            except ValueError:
-                print("Couldn't read quality argument -- 196 kB/s are used by default")
-                print(usage)
-            finally :
-                del arg_list[0]
+    args = parser.parse_args()
 
-        elif arg_list[0] in options['cont']:
-            del arg_list[0]
-            cont = True
-
-        elif arg_list[0] in options['num']:
-            del arg_list[0]
-            try: 
-                num  = int(arg_list[0])
-            except ValueError:
-                print("Couldn't read number argument -- n = 0 by default")
-                print(usage)
-            finally:
-                del arg_list[0]
-
-        elif arg_list[0] in options['tags']:
-            del arg_list[0]
-            tags = True
-
-        elif arg_list[0] in options['rename']:
-            del arg_list[0]
-            rename = True
-        
-        else :
-            if urlfile is not False:
-                print("Error: Couldn't parse command.")
-                print(usage)
-                sys.exit()
-            else :
-                urlfile = arg_list[0]
-                del arg_list[0]
-    
-    if urlfile == False:
-        print('Error: No URL-file given')
-        print(usage)
-        sys.exit()
     print('\n-------------------------------')
-    print('Filename: %s     ' % urlfile)
-    print('Bitrate: %d kB/s ' % bitrate)
-    if tags:   print('Tags enabled     ')
-    if rename: print("Will try to rename mp3's")
-    if cont:   print("Will continue previous try")
-    if num:    print("Process blocks of size %d" % num)
-    print('-------------------------------\n')
-    return (bitrate, tags, urlfile, rename, cont, num)
+    print('Filename: %s     ' % args.urlfile)
+    print('Bitrate: %d kB/s ' % args.quality)
+    if not args.notags: print('Tags enabled')
+    if args.rename: print("Will try to rename mp3's")
+    if args.cont: print("Will continue previous try")
 
-def create_mp3(cmd_tuple):
+    print('-------------------------------\n')
+
+    return args
+                         
+
+def create_mp3(args):
     url_list = []
     tag_list = []
     try :
-        url_file = open(cmd_tuple[2])
+        url_file = open(args.urlfile)
     except IOError :
-        print("Error: Couldn't open URL-File %s" % cmd_tuple[2])
+        print("Error: Couldn't open URL-File %s" % args.urlfile)
         sys.exit()
     for line in url_file :
         if line[0] not in ["\n", "#"]:
@@ -112,20 +66,20 @@ def create_mp3(cmd_tuple):
             url_list.append(parts[0])
             tag_list.append(' '.join([str(x) for x in parts[1:]]))
 
-    if cmd_tuple[1]: # This means: if tags=True
+    if not args.notags: # This means: if tags=True
         name_list = [x[x.find('=')+1:] + '.mp3' for x in url_list] # create list of names
         print("Create mp3's: youtube-dl %s --id --extract-audio --audio-format mp3 --audio-quality %dK %s" % \
-              ("-c" if cmd_tuple[4] else "", cmd_tuple[0], ' '.join([str(x) for x in url_list])))
+              ("-c" if args.cont else "", args.quality, ' '.join([str(x) for x in url_list])))
         print("-----------------------------------------------------------")
         call("youtube-dl %s --extract-audio --id --audio-format mp3 --audio-quality %dK %s" % \
-             ("-c" if cmd_tuple[4] else "", cmd_tuple[0], ' '.join([str(x) for x in url_list])), shell=True)
+             ("-c" if args.cont else "", args.quality, ' '.join([str(x) for x in url_list])), shell=True)
         print("-----------------------------------------------------------\n")
         for n in range(len(url_list)):
             if tag_list[n]:
-                print("Create Tags: eyeD3 %s %s" % (tag_list[n], name_list[n]))
-                call(r"eyeD3 --remove-all %s > /dev/null 2>&1" % name_list[n], shell=True);
-                call(r"eyeD3 %s %s > /dev/null" % (tag_list[n], name_list[n]), shell=True)
-        if cmd_tuple[3]: # if rename=True
+                print("Create Tags: eyeD3 %s ./%s" % (tag_list[n], name_list[n]))
+                call(r"eyeD3 --remove-all ./%s > /dev/null 2>&1" % name_list[n], shell=True);
+                call(r"eyeD3 %s ./%s > /dev/null" % (tag_list[n], name_list[n]), shell=True)
+        if args.rename: # if rename=True
             for n in range(len(url_list)):
                 tags = eyed3.load(name_list[n])
                 if tags.tag.title not in ["",u""]:
@@ -138,12 +92,12 @@ def create_mp3(cmd_tuple):
 
 
     else :
-        print("Create mp3's: youtube-dl -t --extract-audio --audio-format mp3 --audio-quality %dK %s" % (cmd_tuple[0], ' '.join([str(x) for x in url_list])))
+        print("Create mp3's: youtube-dl -t --extract-audio --audio-format mp3 --audio-quality %dK %s" % (args.quality, ' '.join([str(x) for x in url_list])))
         print("-----------------------------------------------------------")
-        call("youtube-dl -t --extract-audio --audio-format mp3 --audio-quality %dK %s" % (cmd_tuple[0], ' '.join([str(x) for x in url_list])), shell=True)
+        call("youtube-dl -t --extract-audio --audio-format mp3 --audio-quality %dK %s" % (args.quality, ' '.join([str(x) for x in url_list])), shell=True)
         print("-----------------------------------------------------------\n")
 
 
 if __name__ == '__main__':
-    create_mp3(parse_command(sys.argv[1:]))
+    create_mp3(parse_args())
 
